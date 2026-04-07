@@ -5,8 +5,8 @@ function App() {
   const [text, setText] = useState("");
   const [response, setResponse] = useState("");
 
-  const speechKey = process.env.AZURE_SPEECH_KEY;
-  const region = process.env.AZURE_SPEECH_REGION;
+  const speechKey = process.env.REACT_APP_AZURE_SPEECH_KEY;
+  const region = process.env.REACT_APP_AZURE_SPEECH_REGION;
 
   const startListening = () => {
     const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(speechKey, region);

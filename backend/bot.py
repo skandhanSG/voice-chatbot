@@ -1,14 +1,10 @@
-import requests
-import os
-
 from botbuilder.core import ActivityHandler, TurnContext
-from botbuilder.schema import ChannelAccount
+from botbuilder.schema import HeroCard, CardAction, ActionTypes, Attachment, Activity
 
 from language import detect_language
 from translator import translate_to_english, translate_from_english
 from ai_engine import get_response
-from speech import speech_to_text_from_file  # you need this
-from botbuilder.schema import HeroCard, CardAction, ActionTypes, Attachment
+
 
 class L1SupportBot(ActivityHandler):
 
@@ -38,13 +34,15 @@ class L1SupportBot(ActivityHandler):
                     content=card
                 )
 
+                # ✅ Correct way
                 await turn_context.send_activity(
-                    {"attachments": [attachment]}
+                    Activity(
+                        type="message",
+                        attachments=[attachment]
+                    )
                 )
 
-    async def send_welcome_card(self, turn_context):
-        from botbuilder.schema import HeroCard, CardAction, ActionTypes, Attachment
-
+    async def send_welcome_card(self, turn_context: TurnContext):
         card = HeroCard(
             title="👋 Welcome to IT Support",
             text="Choose how you want support:",
@@ -67,17 +65,29 @@ class L1SupportBot(ActivityHandler):
             content=card
         )
 
-        await turn_context.send_activity({"attachments": [attachment]})
+        await turn_context.send_activity(
+            Activity(
+                type="message",
+                attachments=[attachment]
+            )
+        )
 
     async def on_message_activity(self, turn_context: TurnContext):
         try:
-            user_input = turn_context.activity.text.lower()
+            user_input = turn_context.activity.text
 
-            # 👇 Handle button click
+            # ✅ Handle empty / non-text activity
+            if not user_input:
+                await turn_context.send_activity("⚠️ Please send a valid message.")
+                return
+
+            user_input = user_input.lower()
+
+            # 👇 Button handling
             if user_input == "text support":
                 await turn_context.send_activity("💬 How can I assist you today?")
                 return
-            
+
             if user_input in ["hi", "hello", "start"]:
                 await self.send_welcome_card(turn_context)
                 return
@@ -86,9 +96,9 @@ class L1SupportBot(ActivityHandler):
                 await turn_context.send_activity(
                     "🎤 Click here to start voice support:\nhttp://localhost:3000"
                 )
-                return  
+                return
 
-            # 👇 Normal flow
+            # 👇 AI Flow
             lang = detect_language(user_input)
             english_text = translate_to_english(user_input, lang)
             response = get_response(english_text)
@@ -98,4 +108,4 @@ class L1SupportBot(ActivityHandler):
 
         except Exception as e:
             print(f"🔥 BOT ERROR: {str(e)}")
-            await turn_context.send_activity("⚠️ Error occurred.")    
+            await turn_context.send_activity("⚠️ Bot encountered an error.")

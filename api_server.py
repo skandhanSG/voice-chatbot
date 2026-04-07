@@ -28,8 +28,19 @@ def chat(req: RequestModel):
     user_input = req.message
 
     lang = detect_language(user_input)
-    english = translate_to_english(user_input, lang)
-    response = get_response(english)
-    final = translate_from_english(response, lang)
 
-    return {"response": final}
+    # 🔥 Handle English directly
+    if lang == "en":
+        response = get_response(user_input)
+
+    # 🔥 Handle Chinese directly (NO translation)
+    elif lang in ["zh-cn", "zh-tw", "zh"]:
+        response = get_response(user_input)
+
+    # 🔥 Other languages → use translation
+    else:
+        english = translate_to_english(user_input, lang)
+        response = get_response(english)
+        response = translate_from_english(response, lang)
+
+    return {"response": response}
