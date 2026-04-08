@@ -6,7 +6,7 @@ from botbuilder.schema import ChannelAccount
 
 from backend.language import detect_language
 from backend.translator import translate_to_english, translate_from_english
-from backend.ai_engine import get_ai_response
+from backend.ai_engine import get_response
 from backend.speech import speech_to_text_from_file  # you need this
 
 
@@ -63,7 +63,7 @@ class L1SupportBot(ActivityHandler):
             english_text = translate_to_english(user_input, lang)
 
             # 🤖 AI
-            response = get_ai_response(english_text)
+            response = get_response(english_text)
 
             # 🔁 Translate back
             final_response = translate_from_english(response, lang)

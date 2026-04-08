@@ -1,6 +1,8 @@
 import azure.cognitiveservices.speech as speechsdk
-from config import AZURE_SPEECH_KEY, AZURE_SPEECH_REGION
+from . import config
 
+AZURE_SPEECH_KEY = config.AZURE_SPEECH_KEY  
+AZURE_SPEECH_REGION = config.AZURE_SPEECH_REGION
 
 def speech_to_text_from_file(file_path):
     speech_config = speechsdk.SpeechConfig(
