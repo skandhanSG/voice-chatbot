@@ -1,8 +1,9 @@
 import os
 from aiohttp import web
-from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings
+from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, MessageFactory
 from botbuilder.core.integration import aiohttp_error_middleware
-from botbuilder.schema import Activity
+from botbuilder.schema import Activity, ActivityTypes, Attachment, CardImage
+from botbuilder.schema import HeroCard, CardAction, ActionTypes
 from botframework.connector.auth import ClaimsIdentity
 from dotenv import load_dotenv
 
@@ -10,11 +11,6 @@ load_dotenv()
 
 from bot import L1SupportBot, conversation_references
 
-# ─────────────────────────────────────────────────────────────
-# Credentials
-# Local Emulator → both stay ""  (empty string)
-# Production     → set MICROSOFT_APP_ID + MICROSOFT_APP_PASSWORD in .env
-# ─────────────────────────────────────────────────────────────
 APP_ID       = os.getenv("MICROSOFT_APP_ID", "")
 APP_PASSWORD = os.getenv("MICROSOFT_APP_PASSWORD", "")
 
@@ -24,50 +20,14 @@ BOT      = L1SupportBot()
 
 
 async def on_error(context, error):
-    print(f"BOT ERROR: {error}")
-    await context.send_activity("Bot encountered an error.")
+    print(f"🔥 BOT ERROR: {error}")
+    await context.send_activity("⚠️ Bot encountered an error.")
 
 ADAPTER.on_turn_error = on_error
 
 
 # ─────────────────────────────────────────────────────────────
-# Build the ClaimsIdentity used for proactive messaging.
-#
-# WHY ClaimsIdentity instead of bot_id (app_id string)?
-#
-#   continue_conversation() validates:
-#       if not bot_id and not claims_identity:
-#           raise Exception("Expected bot_id or claims_identity")
-#
-#   When APP_ID = "" (Emulator / no auth), "" is FALSY in Python,
-#   so `not bot_id` is True → the check always fails.
-#
-#   The correct fix for unauthenticated / Emulator mode is to pass a
-#   ClaimsIdentity directly. The SDK accepts this and skips the
-#   bot_id string validation entirely.
-#
-#   For production (real Teams with App ID):
-#     The ClaimsIdentity below will still work because we embed
-#     APP_ID in the claims. No code change needed when you go live.
-# ─────────────────────────────────────────────────────────────
-def _build_claims_identity() -> ClaimsIdentity:
-    """
-    Build a ClaimsIdentity for proactive messaging.
-    - is_authenticated=True  → tells the SDK this is a trusted internal call
-    - claims dict             → "aud" (audience) = APP_ID
-                                "iss" (issuer)   = APP_ID
-    For Emulator both are "" which is fine — the SDK doesn't validate
-    the claim values themselves, only that a ClaimsIdentity object exists.
-    """
-    claims = {
-        "aud": APP_ID,   # audience
-        "iss": APP_ID,   # issuer
-    }
-    return ClaimsIdentity(claims=claims, is_authenticated=True)
-
-
-# ─────────────────────────────────────────────────────────────
-# /api/messages  — receives all Teams / Emulator messages
+# /api/messages
 # ─────────────────────────────────────────────────────────────
 async def messages(req: web.Request) -> web.Response:
     try:
@@ -82,51 +42,99 @@ async def messages(req: web.Request) -> web.Response:
         return web.Response(status=201)
 
     except Exception as e:
-        print(f"APP ERROR: {str(e)}")
+        print(f"🔥 APP ERROR: {str(e)}")
         return web.Response(status=500, text=str(e))
 
 
 # ─────────────────────────────────────────────────────────────
-# /api/proactive  — called by FastAPI to push a message into
-#                   a live Teams / Emulator conversation
+# /api/proactive
+#
+# Accepts two payload shapes from FastAPI:
+#
+#   1. Plain bot reply:
+#      { "user_id": "...", "text": "bot answer here" }
+#      → Sent as a normal bot message bubble
+#
+#   2. User voice message card:
+#      { "user_id": "...", "attachment": { "type": "user_voice", "text": "..." } }
+#      → Rendered as a HeroCard with a distinct header so it's visually
+#        separated from the bot reply and clearly labelled as the user's input
+#
+# WHY a card for the user message?
+#   Both messages are technically sent BY THE BOT (proactive messaging).
+#   Teams/Emulator always shows bot-sent messages on the LEFT side.
+#   We cannot fake a right-side user bubble from the bot's context.
+#   The best UX solution is a styled card with a clear "🎤 You said:" header
+#   so users instantly understand which is their input vs the bot's reply.
 # ─────────────────────────────────────────────────────────────
 async def send_proactive(req: web.Request) -> web.Response:
     try:
         body    = await req.json()
         user_id = body.get("user_id")
         text    = body.get("text")
+        attachment_data = body.get("attachment")  # present for user voice msg
 
-        if not user_id or not text:
-            return web.Response(status=400, text="'user_id' and 'text' are required")
+        if not user_id:
+            return web.Response(status=400, text="'user_id' is required")
 
         conversation_ref = conversation_references.get(user_id)
 
         if not conversation_ref:
             msg = (
                 f"No ConversationReference for user: {user_id}. "
-                f"User must send at least one message to the bot first."
+                f"User must send at least one message in Teams/Emulator first."
             )
-            print(f"Error: {msg}")
+            print(f"⚠️  {msg}")
             return web.Response(status=404, text=msg)
 
-        async def _send(turn_context):
-            await turn_context.send_activity(text)
+        # ── Build the activity to send ────────────────────────────
+        if attachment_data and attachment_data.get("type") == "user_voice":
+            # Render user's spoken text as a visually distinct HeroCard
+            spoken_text = attachment_data.get("text", "")
 
-        # THE FIX: use ClaimsIdentity instead of bot_id string
-        # This bypasses the `if not bot_id` falsy-string check in the SDK
-        claims_identity = _build_claims_identity()
+            hero_card = HeroCard(
+                # Title clearly labels this as the USER's voice input
+                title="🎤  You said",
+                # The spoken text is the card subtitle
+                text=spoken_text,
+            )
+
+            activity_to_send = MessageFactory.attachment(
+                Attachment(
+                    content_type="application/vnd.microsoft.card.hero",
+                    content=hero_card,
+                )
+            )
+
+        elif text:
+            # Plain bot reply — standard message
+            activity_to_send = MessageFactory.text(text)
+
+        else:
+            return web.Response(status=400, text="Either 'text' or 'attachment' is required")
+
+        # ── Send via continue_conversation ────────────────────────
+        async def _send(turn_context):
+            await turn_context.send_activity(activity_to_send)
+
+        # ClaimsIdentity bypasses the `if not bot_id` falsy-string check
+        # that causes "Expected bot_id or claims_identity" when APP_ID = ""
+        claims_identity = ClaimsIdentity(
+            claims={"aud": APP_ID, "iss": APP_ID},
+            is_authenticated=True
+        )
 
         await ADAPTER.continue_conversation(
             conversation_ref,
             _send,
-            claims_identity=claims_identity   # keyword arg — not positional
+            claims_identity=claims_identity
         )
 
-        print(f"Proactive message sent → Teams | user: {user_id}")
+        print(f"✅ Proactive message sent → Teams | user: {user_id}")
         return web.Response(status=200, text="OK")
 
     except Exception as e:
-        print(f"PROACTIVE ERROR: {str(e)}")
+        print(f"🔥 PROACTIVE ERROR: {str(e)}")
         return web.Response(status=500, text=str(e))
 
 
