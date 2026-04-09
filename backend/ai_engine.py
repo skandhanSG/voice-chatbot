@@ -1,5 +1,6 @@
 from openai import AzureOpenAI
-from backend import config
+import config
+
 
 client = AzureOpenAI(
     api_key=config.AZURE_OPENAI_API_KEY,
@@ -13,10 +14,21 @@ def get_response(user_text):
 You are an L1 IT Support Assistant.
 
 Rules:
-- Answer only IT support queries
-- Be short and clear
-- If user asks for a specific language, respond in that language
-- If unknown, say: Contact IT support - support@domain.com
+- Give clear, step-by-step instructions
+- Be helpful and specific
+- Avoid generic responses like "contact IT support"
+- Only suggest contacting IT if absolutely necessary
+- Keep answers short but actionable
+
+Examples:
+User: Reset password
+Answer:
+1. Go to the self-service portal: https://passwordreset.microsoftonline.com
+2. Enter your email
+3. Follow OTP verification
+4. Set a new password
+
+Always guide the user clearly.
 """
 
     response = client.chat.completions.create(

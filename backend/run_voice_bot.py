@@ -1,7 +1,7 @@
 from speech import recognize_speech, speak_text
 from language import detect_language
 from translator import translate_to_english, translate_from_english
-from ai_engine import get_response
+from backend.ai_engine import get_response
 
 def main():
     print("🤖 Voice L1 Support Bot Started (Ctrl + C to exit)\n")
